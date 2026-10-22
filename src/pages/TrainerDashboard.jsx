@@ -1,16 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
+import StatCard from '../components/StatCard';
+import ChartCard from '../components/ChartCard';
 import Chat from '../components/Chat';
 import UserModal from '../components/UserModal';
-import TaskCard from '../components/TaskCard';
 import TaskModal from '../components/TaskModal';
+import ClassAttachmentSection from '../components/ClassAttachmentSection';
 import Toast from '../components/Toast';
-import ProgressChart from '../components/ProgressChart';
-import { UserTaskSkeleton } from '../components/LoadingSkeleton';
+import TaskCard from '../components/TaskCard';
+import LoadingSkeleton, { UserTaskSkeleton } from '../components/LoadingSkeleton';
 import { apiClient } from '../apiClient';
 import {
   Users,
   Video,
+  Upload,
   MessageSquare,
   BookOpen,
   Plus,
@@ -25,7 +28,15 @@ import {
   User as UserIcon,
   ChevronDown,
   ChevronRight,
+  Image,
 } from 'lucide-react';
+
+const normalizeSupabasePublicUrl = (url) => {
+  const raw = String(url || '');
+  if (!raw) return raw;
+  if (raw.includes('/storage/v1/object/public/')) return raw;
+  return raw.replace('/storage/v1/object/', '/storage/v1/object/public/');
+};
 
 const TrainerDashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -163,8 +174,8 @@ const TrainerDashboard = ({ user, onLogout }) => {
       duration: Number.isFinite(Number(c?.duration)) ? Number(c.duration) : 30,
       level: c?.level || 'Intermedio',
       category: c?.category || 'General',
-      video_url: c?.video_url || '',
-      thumbnail_url: c?.thumbnail_url || '',
+      video_url: normalizeSupabasePublicUrl(c?.video_url || ''),
+      thumbnail_url: normalizeSupabasePublicUrl(c?.thumbnail_url || ''),
     });
     setIsClassModalOpen(true);
   };
@@ -172,6 +183,60 @@ const TrainerDashboard = ({ user, onLogout }) => {
   const closeClassModal = () => {
     setIsClassModalOpen(false);
     setSelectedClass(null);
+  };
+
+  const handleUploadClassFileToUrlField = async (field, accept) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // Sin restricción de tamaño
+
+      setClassModalLoading(true);
+      try {
+        const result = await apiClient.uploadFile(file);
+        setClassForm(prev => ({ ...prev, [field]: result.url }));
+        showToast('Archivo subido correctamente', 'success');
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        showToast(error?.message || 'Error al subir archivo', 'error');
+      } finally {
+        setClassModalLoading(false);
+      }
+    };
+    input.click();
+  };
+
+  const handleUploadClassAttachmentQuick = async (accept) => {
+    if (!selectedClass?.id) {
+      showToast('Guarda la clase primero para subir adjuntos', 'warning');
+      return;
+    }
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // Sin restricción de tamaño
+
+      setClassModalLoading(true);
+      try {
+        await apiClient.uploadClassAttachment(selectedClass.id, file);
+        showToast('Adjunto subido correctamente', 'success');
+      } catch (error) {
+        console.error('Error uploading class attachment:', error);
+        showToast(error?.message || 'Error al subir adjunto', 'error');
+      } finally {
+        setClassModalLoading(false);
+      }
+    };
+    input.click();
   };
 
   const handleSaveClass = async () => {
@@ -1212,37 +1277,54 @@ const TrainerDashboard = ({ user, onLogout }) => {
 
           {isClassModalOpen && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
-              <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-semibold text-gray-900">{selectedClass ? 'Editar Clase' : 'Crear Clase'}</h2>
-                  <button onClick={closeClassModal} className="text-gray-400 hover:text-gray-600 transition-colors">
-                    <X className="w-6 h-6" />
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-indigo-600">
+                  <h2 className="text-lg font-semibold text-white">{selectedClass ? 'Editar Clase' : 'Nueva Clase'}</h2>
+                  <button onClick={closeClassModal} className="text-white hover:text-indigo-200 transition-colors">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <div className="p-6 space-y-4">
+                <div className="p-4 space-y-3">
+                  {/* Título */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Título *</label>
                     <input
                       type="text"
                       value={classForm.title}
                       onChange={(e) => setClassForm(prev => ({ ...prev, title: e.target.value }))}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="Ej: Rutina de Fuerza - Pecho"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="Ej: Rutina de Fuerza"
                     />
                   </div>
 
+                  {/* Descripción */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
                     <textarea
                       value={classForm.description}
                       onChange={(e) => setClassForm(prev => ({ ...prev, description: e.target.value }))}
-                      rows={3}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="¿En qué consiste esta clase?"
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Nivel y Categoría */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Nivel</label>
+                      <select
+                        value={classForm.level}
+                        onChange={(e) => setClassForm(prev => ({ ...prev, level: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">Seleccionar...</option>
+                        <option value="Principiante">Principiante</option>
+                        <option value="Intermedio">Intermedio</option>
+                        <option value="Avanzado">Avanzado</option>
+                      </select>
+                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Duración (min)</label>
                       <input
@@ -1250,72 +1332,91 @@ const TrainerDashboard = ({ user, onLogout }) => {
                         min="1"
                         value={classForm.duration}
                         onChange={(e) => setClassForm(prev => ({ ...prev, duration: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder="30"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Nivel</label>
-                      <select
-                        value={classForm.level}
-                        onChange={(e) => setClassForm(prev => ({ ...prev, level: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  </div>
+
+                  {/* Categoría */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Categoría</label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Cardio', 'Fuerza', 'Flexibilidad', 'Yoga', 'HIIT', ' funcional'].map((cat) => {
+                        const selected = classForm.category === cat;
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setClassForm(prev => ({ ...prev, category: selected ? '' : cat }))}
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                              selected
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Botones de subir archivos */}
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Multimedia</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleUploadClassFileToUrlField('video_url', 'video/*')}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+                        disabled={classModalLoading}
                       >
-                        <option value="Principiante">Principiante</option>
-                        <option value="Intermedio">Intermedio</option>
-                        <option value="Avanzado">Avanzado</option>
-                      </select>
+                        <Video className="w-4 h-4" />
+                        Video
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUploadClassFileToUrlField('thumbnail_url', 'image/*')}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+                        disabled={classModalLoading}
+                      >
+                        <Image className="w-4 h-4" />
+                        Imagen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUploadClassAttachmentQuick('application/pdf,.pdf')}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-gray-700 hover:bg-gray-800 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+                        disabled={classModalLoading}
+                        title={!selectedClass?.id ? 'Guarda la clase primero' : undefined}
+                      >
+                        <Upload className="w-4 h-4" />
+                        PDF
+                      </button>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
-                      <div className="flex flex-wrap gap-2">
-                        {['Cardio', 'Fuerza', 'Flexibilidad', 'Yoga'].map((cat) => {
-                          const selected = (classForm.category || 'General') === cat;
-                          return (
-                            <button
-                              key={cat}
-                              type="button"
-                              onClick={() => setClassForm(prev => ({ ...prev, category: cat }))}
-                              className={`px-4 py-2 rounded-full border text-sm font-medium transition-colors ${
-                                selected
-                                  ? 'bg-indigo-600 text-white border-indigo-600'
-                                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              {cat}
-                            </button>
-                          );
-                        })}
+                    {/* Mostrar URLs si existen */}
+                    {(classForm.video_url || classForm.thumbnail_url) && (
+                      <div className="mt-2 text-xs text-gray-600 space-y-1">
+                        {classForm.video_url && <div className="truncate">✓ Video asignado</div>}
+                        {classForm.thumbnail_url && <div className="truncate">✓ Imagen asignada</div>}
                       </div>
+                    )}
+                  </div>
+
+                  {/* Adjuntos (solo si ya se guardó la clase) */}
+                  {selectedClass?.id && (
+                    <div className="mt-2">
+                      <ClassAttachmentSection classId={selectedClass.id} isEditing={true} />
                     </div>
-                  </div>
+                  )}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Video URL</label>
-                    <input
-                      type="url"
-                      value={classForm.video_url}
-                      onChange={(e) => setClassForm(prev => ({ ...prev, video_url: e.target.value }))}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="https://..."
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Thumbnail URL</label>
-                    <input
-                      type="url"
-                      value={classForm.thumbnail_url}
-                      onChange={(e) => setClassForm(prev => ({ ...prev, thumbnail_url: e.target.value }))}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="https://..."
-                    />
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-gray-200">
+                  {/* Botones de acción */}
+                  <div className="flex gap-2 pt-2">
                     <button
                       type="button"
                       onClick={closeClassModal}
-                      className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                       disabled={classModalLoading}
                     >
                       Cancelar
@@ -1324,9 +1425,9 @@ const TrainerDashboard = ({ user, onLogout }) => {
                       type="button"
                       onClick={handleSaveClass}
                       disabled={classModalLoading}
-                      className="flex items-center justify-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
                     >
-                      {classModalLoading ? 'Guardando...' : selectedClass ? 'Actualizar' : 'Crear'}
+                      {classModalLoading ? 'Guardando...' : selectedClass ? 'Actualizar' : 'Crear Clase'}
                     </button>
                   </div>
                 </div>
@@ -1348,86 +1449,78 @@ const TrainerDashboard = ({ user, onLogout }) => {
                 </button>
               </div>
 
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                {trainerClassesLoading ? (
-                  <div className="p-8 text-center text-gray-600">Cargando clases...</div>
-                ) : trainerClasses.length === 0 ? (
-                  <div className="p-8 text-center text-gray-600">No hay clases creadas para este entrenador</div>
-                ) : usersLoading ? (
-                  <div className="p-8 text-center text-gray-600">Cargando usuarios...</div>
-                ) : fetchedUsers.length === 0 ? (
-                  <div className="p-8 text-center text-gray-600">No hay usuarios asignados a este entrenador</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
-                          {trainerClasses.map(c => (
-                            <th key={c.id} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="truncate max-w-[12rem]" title={c.title}>{c.title}</span>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditClassModal(c)}
-                                    className="text-gray-500 hover:text-gray-700"
-                                    title="Editar"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteClass(c.id)}
-                                    className="text-red-500 hover:text-red-700"
-                                    title="Eliminar"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </div>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {fetchedUsers.filter(u => u?.id).map(u => {
-                          const displayName = [u.full_name, u.last_names].filter(Boolean).join(' ').trim() || u.username;
-                          return (
-                            <tr key={u.id}>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm font-medium text-gray-900">{displayName}</div>
-                                <div className="text-sm text-gray-500">{u.email || ''}</div>
-                              </td>
-                              {trainerClasses.map(c => {
-                                const key = `${u.id}:${c.id}`;
-                                const assigned = classAssignments?.[u.id]?.has(c.id);
-                                const loading = !!classAssignLoading?.[key];
-                                return (
-                                  <td key={c.id} className="px-4 py-4 whitespace-nowrap">
-                                    <button
-                                      type="button"
-                                      disabled={loading}
-                                      onClick={() => toggleAssignClass(u.id, c.id)}
-                                      className={`px-3 py-1 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                        assigned
-                                          ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                      }`}
-                                    >
-                                      {loading ? '...' : assigned ? 'Asignada' : 'Asignar'}
-                                    </button>
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+              {trainerClassesLoading ? (
+                <div className="p-8 text-center text-gray-600">Cargando clases...</div>
+              ) : trainerClasses.length === 0 ? (
+                <div className="bg-white rounded-lg shadow p-8 text-center">
+                  <p className="text-gray-600 mb-4">No hay clases creadas aún</p>
+                  <button
+                    onClick={openCreateClassModal}
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Crear tu primera clase
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Vista de clases como tarjetas */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {trainerClasses.map((c) => (
+                      <div key={c.id} className="bg-white rounded-lg shadow hover:shadow-md transition-shadow p-4 border border-gray-200">
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="font-semibold text-gray-900 truncate flex-1" title={c.title}>
+                            {c.title}
+                          </h3>
+                          <div className="flex gap-1 ml-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditClassModal(c)}
+                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                              title="Editar"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteClass(c.id)}
+                              className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {c.category && (
+                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-xs rounded-full">
+                              {c.category}
+                            </span>
+                          )}
+                          {c.level && (
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full">
+                              {c.level}
+                            </span>
+                          )}
+                          {c.duration && (
+                            <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
+                              {c.duration} min
+                            </span>
+                          )}
+                        </div>
+                        {c.description && (
+                          <p className="text-sm text-gray-600 line-clamp-2">{c.description}</p>
+                        )}
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <p className="text-xs text-gray-500">
+                            {fetchedUsers.length} usuario(s) asignado(s)
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
+                </>
+              )}
             </div>
           )}
 

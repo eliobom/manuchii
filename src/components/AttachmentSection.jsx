@@ -2,24 +2,37 @@ import React, { useState, useEffect } from 'react';
 import { Upload, X, FileText, Image, Video, Download, Trash2 } from 'lucide-react';
 import { apiClient } from '../apiClient';
 
+const normalizeSupabasePublicUrl = (url) => {
+  const raw = String(url || '');
+  if (!raw) return raw;
+  if (raw.includes('/storage/v1/object/public/')) return raw;
+  return raw.replace('/storage/v1/object/', '/storage/v1/object/public/');
+};
+
 const AttachmentSection = ({ taskId, isEditing = false }) => {
   const [attachments, setAttachments] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Only load attachments when we have a valid taskId
+  const hasValidTaskId = taskId && taskId !== 'undefined' && taskId !== null;
 
   useEffect(() => {
-    if (taskId) {
+    if (hasValidTaskId) {
       loadAttachments();
     }
   }, [taskId]);
 
   const loadAttachments = async () => {
     setIsLoading(true);
+    setError(null);
     try {
-      const response = await apiClient.getTaskAttachments(taskId);
-      setAttachments(response.data || []);
+      const data = await apiClient.getTaskAttachments(taskId);
+      setAttachments(data || []);
     } catch (error) {
       console.error('Error loading attachments:', error);
+      setError('Error al cargar adjuntos');
     } finally {
       setIsLoading(false);
     }
@@ -29,23 +42,18 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
     const file = event.target.files[0];
     if (!file) return;
 
-    // Validate file size (max 50MB)
-    if (file.size > 50 * 1024 * 1024) {
-      alert('El archivo es demasiado grande. Máximo 50MB.');
+    // Validate taskId
+    if (!hasValidTaskId) {
+      alert('Guarda la tarea primero antes de subir archivos');
       return;
     }
 
-    // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/avi', 'video/mov', 'application/pdf'];
-    if (!allowedTypes.includes(file.type)) {
-      alert('Tipo de archivo no permitido. Solo imágenes, videos y PDFs.');
-      return;
-    }
+    // Sin restricciones de tamaño ni tipo de archivo
 
     setIsUploading(true);
     try {
-      const response = await apiClient.uploadTaskAttachment(taskId, file);
-      setAttachments(prev => [response, ...prev]);
+      const attachment = await apiClient.uploadTaskAttachment(taskId, file);
+      setAttachments(prev => [attachment, ...prev]);
     } catch (error) {
       console.error('Error uploading attachment:', error);
       alert('Error al subir el archivo: ' + error.message);
@@ -88,6 +96,7 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
   const renderAttachment = (attachment) => {
     const isImage = attachment.file_type === 'image';
     const isVideo = attachment.file_type === 'video';
+    const fileUrl = normalizeSupabasePublicUrl(attachment.file_url);
 
     return (
       <div key={attachment.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -98,10 +107,10 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
             {isImage ? (
               <div className="flex items-center gap-3">
                 <img
-                  src={attachment.file_url}
+                  src={fileUrl}
                   alt={attachment.original_filename}
                   className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => window.open(attachment.file_url, '_blank')}
+                  onClick={() => window.open(fileUrl, '_blank')}
                 />
                 <div>
                   <p className="text-sm font-medium text-gray-900 truncate max-w-xs">
@@ -127,7 +136,7 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.open(attachment.file_url, '_blank')}
+            onClick={() => window.open(fileUrl, '_blank')}
             className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
             title="Ver/Download"
           >
@@ -152,7 +161,7 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium text-gray-900">Adjuntos</h3>
-        {isEditing && (
+        {isEditing && hasValidTaskId && (
           <div className="relative">
             <input
               type="file"
@@ -187,6 +196,11 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
           <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
           <p className="text-sm text-gray-600 mt-2">Cargando adjuntos...</p>
         </div>
+      ) : !hasValidTaskId ? (
+        <div className="text-center py-8 text-gray-500">
+          <Upload className="w-12 h-12 mx-auto mb-2 opacity-50" />
+          <p className="text-sm">Guarda la tarea primero para agregar adjuntos</p>
+        </div>
       ) : attachments.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
           <Upload className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -205,7 +219,7 @@ const AttachmentSection = ({ taskId, isEditing = false }) => {
 
       {isEditing && (
         <p className="text-xs text-gray-500">
-          Tipos permitidos: Imágenes (JPG, PNG, GIF, WebP), Videos (MP4, AVI, MOV), PDFs. Máximo 50MB por archivo.
+          Se permiten archivos de cualquier tipo y tamaño.
         </p>
       )}
 
