@@ -116,8 +116,10 @@ CREATE TABLE IF NOT EXISTS classes (
   category VARCHAR(100), -- 'Cardio', 'Fuerza', 'Yoga', etc.
   video_url VARCHAR(500),
   thumbnail_url VARCHAR(500),
-  rating DECIMAL(3,2),
-  reviews_count INTEGER DEFAULT 0,
+  -- Campos para permitir subida de fotos/videos desde el PC
+  allow_user_uploads BOOLEAN DEFAULT FALSE, -- Permite que usuarios suban sus propios archivos
+  media_type VARCHAR(50), -- 'video', 'image', 'both'
+  max_upload_size INTEGER DEFAULT 52428800, -- 50MB por defecto
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -221,13 +223,36 @@ CREATE TABLE IF NOT EXISTS task_comments (
 CREATE TABLE IF NOT EXISTS task_attachments (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES app_users(id) ON DELETE SET NULL, -- Usuario que subió el archivo
     filename VARCHAR(255) NOT NULL,
     original_filename VARCHAR(255) NOT NULL,
     file_url VARCHAR(500) NOT NULL,
     file_type VARCHAR(50) NOT NULL, -- 'image', 'video', 'document'
+    mime_type VARCHAR(100),
     file_size INTEGER NOT NULL,
+    description TEXT,
+    is_approved BOOLEAN DEFAULT FALSE, -- Requiere aprobación del trainer
     uploaded_by UUID NOT NULL REFERENCES users(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Sistema de adjuntos en clases (fotos/videos subidos por usuarios)
+CREATE TABLE IF NOT EXISTS class_attachments (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    filename VARCHAR(255) NOT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    file_url VARCHAR(500) NOT NULL,
+    file_type VARCHAR(50) NOT NULL, -- 'image', 'video'
+    mime_type VARCHAR(100),
+    file_size INTEGER NOT NULL,
+    description TEXT,
+    is_approved BOOLEAN DEFAULT FALSE, -- Requiere aprobación del trainer
+    uploaded_by UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- ============================================================================
@@ -799,7 +824,57 @@ LEFT JOIN favorites f ON u.id = f.user_id
 GROUP BY u.id, u.username, u.full_name, up.classes_completed, up.tasks_completed, up.total_minutes_trained, up.current_streak;
 
 -- ============================================================================
--- SECCIÓN 15: DATOS INICIALES
+-- SECCIÓN 15: LIMPIEZA DE DATOS HUÉRFANOS
+-- ============================================================================
+-- Eliminar registros huérfanos que referencian usuarios inexistentes
+
+-- Limpiar user_progress con user_id que no existe en app_users
+DELETE FROM user_progress WHERE user_id NOT IN (SELECT id FROM app_users);
+
+-- Limpiar user_achievements con user_id que no existe en users
+DELETE FROM user_achievements WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar streaks con user_id que no existe en users
+DELETE FROM streaks WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar messages con from_user_id o to_user_id que no existe en users
+DELETE FROM messages WHERE from_user_id NOT IN (SELECT id FROM users) OR to_user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar notifications con user_id que no existe en users
+DELETE FROM notifications WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar progress_reports con user_id que no existe en users
+DELETE FROM progress_reports WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar exercise_logs con user_id que no existe en app_users
+DELETE FROM exercise_logs WHERE user_id NOT IN (SELECT id FROM app_users);
+
+-- Limpiar habit_logs con user_id que no existe en app_users
+DELETE FROM habit_logs WHERE user_id NOT IN (SELECT id FROM app_users);
+
+-- Limpiar body_measurements con user_id que no existe en app_users
+DELETE FROM body_measurements WHERE user_id NOT IN (SELECT id FROM app_users);
+
+-- Limpiar comments con user_id que no existe en users
+DELETE FROM comments WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar favorites con user_id que no existe en users
+DELETE FROM favorites WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar task_attachments con task_id que no existe en tasks
+DELETE FROM task_attachments WHERE task_id NOT IN (SELECT id FROM tasks);
+
+-- Limpiar task_comments con task_id que no existe en tasks
+DELETE FROM task_comments WHERE task_id NOT IN (SELECT id FROM tasks);
+
+-- Limpiar subscriptions con user_id que no existe en users
+DELETE FROM subscriptions WHERE user_id NOT IN (SELECT id FROM users);
+
+-- Limpiar payments con user_id que no existe en users
+DELETE FROM payments WHERE user_id NOT IN (SELECT id FROM users);
+
+-- ============================================================================
+-- SECCIÓN 16: DATOS INICIALES
 -- ============================================================================
 
 -- Tipos de tareas
@@ -838,7 +913,7 @@ INSERT INTO user_progress (user_id, classes_completed, tasks_completed, total_mi
 ((SELECT id FROM app_users WHERE username = 'testuser'), 2, 5, 90, 1, 2, CURRENT_DATE);
 
 -- ============================================================================
--- SECCIÓN 16: DESHABILITAR ROW LEVEL SECURITY (DESARROLLO)
+-- SECCIÓN 17: DESHABILITAR ROW LEVEL SECURITY (DESARROLLO)
 -- ============================================================================
 -- IMPORTANTE: Para producción, configura políticas RLS apropiadas
 

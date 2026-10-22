@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import StatCard from '../components/StatCard';
 import ChartCard from '../components/ChartCard';
@@ -7,8 +7,6 @@ import UserModal from '../components/UserModal';
 import TaskModal from '../components/TaskModal';
 import ClassAttachmentSection from '../components/ClassAttachmentSection';
 import Toast from '../components/Toast';
-import TaskCard from '../components/TaskCard';
-import LoadingSkeleton, { UserTaskSkeleton } from '../components/LoadingSkeleton';
 import { apiClient } from '../apiClient';
 import {
   Users,
@@ -23,11 +21,8 @@ import {
   X,
   LogOut,
   BarChart3,
-  Clock,
   CheckSquare,
   User as UserIcon,
-  ChevronDown,
-  ChevronRight,
   Image,
 } from 'lucide-react';
 
@@ -54,97 +49,16 @@ const TrainerDashboard = ({ user, onLogout }) => {
 
   const [trainerTasks, setTrainerTasks] = useState([]);
   const [trainerTasksLoading, setTrainerTasksLoading] = useState(false);
-  const [expandedUsers, setExpandedUsers] = useState(new Set());
 
   const [measurements, setMeasurements] = useState({});
   const [measurementsLoading, setMeasurementsLoading] = useState({});
   const [showMeasurements, setShowMeasurements] = useState(new Set());
   const [showProgressChart, setShowProgressChart] = useState(new Set());
-  const [showTemplates, setShowTemplates] = useState(false);
 
   const [taskFilter, setTaskFilter] = useState('all'); // 'all', 'pending', 'completed', 'active', 'due_soon', 'overdue'
   const [taskSort, setTaskSort] = useState('due_date'); // 'due_date', 'priority', 'created_at', 'title'
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc', 'desc'
-  const [selectedTasks, setSelectedTasks] = useState(new Set());
-  const [bulkMode, setBulkMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' or category name
-
-  const taskCategories = [
-    { id: 'fitness', name: 'Fitness', color: 'bg-green-100 text-green-800', icon: '💪' },
-    { id: 'nutrition', name: 'Nutrición', color: 'bg-orange-100 text-orange-800', icon: '🥗' },
-    { id: 'rest', name: 'Descanso', color: 'bg-blue-100 text-blue-800', icon: '😴' },
-    { id: 'motivation', name: 'Motivación', color: 'bg-purple-100 text-purple-800', icon: '🎯' },
-    { id: 'measurement', name: 'Medición', color: 'bg-pink-100 text-pink-800', icon: '📏' },
-    { id: 'general', name: 'General', color: 'bg-gray-100 text-gray-800', icon: '📝' }
-  ];
-
-  const taskTemplates = [
-    {
-      id: 'drink_water',
-      title: 'Beber 2L de agua al día',
-      description: 'Mantén una hidratación adecuada bebiendo al menos 2 litros de agua diariamente. Esto es crucial para el rendimiento físico y la recuperación.',
-      category: 'nutrition',
-      priority: 'high',
-      type: 'habit'
-    },
-    {
-      id: 'cardio_session',
-      title: 'Sesión de cardio de 30 minutos',
-      description: 'Realiza una sesión de ejercicio cardiovascular durante 30 minutos. Puede ser correr, nadar, ciclismo o cualquier actividad que eleve tu ritmo cardíaco.',
-      category: 'fitness',
-      priority: 'high',
-      type: 'exercise'
-    },
-    {
-      id: 'strength_training',
-      title: 'Entrenamiento de fuerza',
-      description: 'Completa una rutina de entrenamiento de fuerza enfocándote en ejercicios compuestos como sentadillas, press de banca y dominadas.',
-      category: 'fitness',
-      priority: 'medium',
-      type: 'exercise'
-    },
-    {
-      id: 'healthy_meal',
-      title: 'Preparar comida saludable',
-      description: 'Prepara una comida balanceada con proteínas, carbohidratos complejos, grasas saludables y abundantes verduras.',
-      category: 'nutrition',
-      priority: 'medium',
-      type: 'habit'
-    },
-    {
-      id: 'body_measurement',
-      title: 'Tomar medidas corporales',
-      description: 'Registra tus medidas corporales: peso, perímetros de brazo, cintura, cadera y muslos. Esto te ayudará a seguir tu progreso.',
-      category: 'measurement',
-      priority: 'medium',
-      type: 'measurement'
-    },
-    {
-      id: 'rest_day',
-      title: 'Día de descanso activo',
-      description: 'Toma un día de descanso del entrenamiento intenso. Realiza actividades ligeras como caminar, yoga suave o estiramientos.',
-      category: 'rest',
-      priority: 'low',
-      type: 'habit'
-    },
-    {
-      id: 'motivation_check',
-      title: 'Revisar metas y motivación',
-      description: 'Tómate tiempo para reflexionar sobre tus metas, celebrar logros y mantener alta tu motivación.',
-      category: 'motivation',
-      priority: 'medium',
-      type: 'goal'
-    },
-    {
-      id: 'sleep_8_hours',
-      title: 'Dormir 8 horas',
-      description: 'Asegúrate de dormir al menos 8 horas por noche. El sueño adecuado es fundamental para la recuperación y el rendimiento.',
-      category: 'rest',
-      priority: 'high',
-      type: 'habit'
-    }
-  ];
 
   const [toast, setToast] = useState(null);
 
@@ -369,46 +283,11 @@ const TrainerDashboard = ({ user, onLogout }) => {
     }
   };
 
-  const buildTrainerTasksView = (tasks, users) => {
-    const usersById = new Map((Array.isArray(users) ? users : []).filter(Boolean).map(u => [u.id, u]));
-    const grouped = new Map();
-
-    (Array.isArray(tasks) ? tasks : []).filter(Boolean).forEach(t => {
-      const userId = t.user_id;
-      if (!userId) return;
-      if (!grouped.has(userId)) grouped.set(userId, []);
-      grouped.get(userId).push(t);
-    });
-
-    return Array.from(grouped.entries())
-      .map(([userId, userTasks]) => {
-        const u = usersById.get(userId);
-        if (!u) return null;
-
-        const total = userTasks.length;
-        const completed = userTasks.filter(t => t.status === 'completed').length;
-        const completionPercentage = total ? Math.round((completed / total) * 100) : 0;
-
-        return {
-          user: {
-            id: u.id,
-            name: [u.full_name, u.last_names].filter(Boolean).join(' ').trim() || u.username,
-            email: u.email || '',
-          },
-          tasks: userTasks,
-          stats: { total, completed, completionPercentage },
-        };
-      })
-      .filter(Boolean);
-  };
-
-  const fetchTrainerTasks = async (opts = {}) => {
-    const { usersOverride } = opts;
+  const fetchTrainerTasks = async () => {
     setTrainerTasksLoading(true);
     try {
       const data = await apiClient.getTrainerTasks();
-      const view = buildTrainerTasksView(data, usersOverride ?? fetchedUsers);
-      setTrainerTasks(view);
+      setTrainerTasks(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching trainer tasks:', error);
       setTrainerTasks([]);
@@ -426,7 +305,7 @@ const TrainerDashboard = ({ user, onLogout }) => {
 
   useEffect(() => {
     if (user?.role === 'trainer') {
-      fetchTrainerTasks({ usersOverride: fetchedUsers });
+      fetchTrainerTasks();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchedUsers]);
@@ -796,13 +675,29 @@ const TrainerDashboard = ({ user, onLogout }) => {
         delete payload.category;
       }
 
+      // Extract pending attachments
+      const pendingAttachments = payload.config?.pendingAttachments || [];
+      delete payload.config?.pendingAttachments;
+
       payload.trainer_id = payload.trainer_id || user?.id;
       payload.assigned_at = payload.assigned_at || new Date().toISOString();
 
+      let savedTask;
       if (selectedTask?.id) {
-        await apiClient.updateTask(selectedTask.id, payload);
+        savedTask = await apiClient.updateTask(selectedTask.id, payload);
       } else {
-        await apiClient.createTask(payload);
+        savedTask = await apiClient.createTask(payload);
+      }
+
+      // Upload pending attachments to task_attachments
+      if (pendingAttachments.length > 0 && savedTask?.id) {
+        for (const attachment of pendingAttachments) {
+          try {
+            await apiClient.attachUploadedFile(savedTask.id, attachment);
+          } catch (error) {
+            console.error('Error uploading attachment:', error);
+          }
+        }
       }
 
       await fetchTrainerTasks();
@@ -813,77 +708,6 @@ const TrainerDashboard = ({ user, onLogout }) => {
       showToast(error?.message || 'Error de conexión', 'error');
     } finally {
       setTaskModalLoading(false);
-    }
-  };
-
-  const toggleUserExpansion = (userId) => {
-    const newExpanded = new Set(expandedUsers);
-    if (newExpanded.has(userId)) {
-      newExpanded.delete(userId);
-    } else {
-      newExpanded.add(userId);
-    }
-    setExpandedUsers(newExpanded);
-  };
-
-  const toggleTaskSelection = (taskId) => {
-    const newSelected = new Set(selectedTasks);
-    if (newSelected.has(taskId)) {
-      newSelected.delete(taskId);
-    } else {
-      newSelected.add(taskId);
-    }
-    setSelectedTasks(newSelected);
-  };
-
-  const selectAllTasks = (tasks) => {
-    const allTaskIds = new Set(tasks.map(task => task.id));
-    setSelectedTasks(allTaskIds);
-  };
-
-  const clearSelection = () => {
-    setSelectedTasks(new Set());
-  };
-
-  const bulkMarkComplete = async () => {
-    if (selectedTasks.size === 0) return;
-
-    try {
-      const promises = Array.from(selectedTasks).map(taskId =>
-        apiClient.updateTask(taskId, {
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-        })
-      );
-
-      await Promise.all(promises);
-      await fetchTrainerTasks();
-      setSelectedTasks(new Set());
-      showToast(`${selectedTasks.size} tareas marcadas como completadas`, 'success');
-    } catch (error) {
-      console.error('Error bulk updating tasks:', error);
-      showToast(error?.message || 'Error al actualizar tareas', 'error');
-    }
-  };
-
-  const bulkMarkPending = async () => {
-    if (selectedTasks.size === 0) return;
-
-    try {
-      const promises = Array.from(selectedTasks).map(taskId =>
-        apiClient.updateTask(taskId, {
-          status: 'pending',
-          completed_at: null,
-        })
-      );
-
-      await Promise.all(promises);
-      await fetchTrainerTasks();
-      setSelectedTasks(new Set());
-      showToast(`${selectedTasks.size} tareas marcadas como pendientes`, 'success');
-    } catch (error) {
-      console.error('Error bulk updating tasks:', error);
-      showToast(error?.message || 'Error al actualizar tareas', 'error');
     }
   };
 
@@ -919,86 +743,6 @@ const TrainerDashboard = ({ user, onLogout }) => {
         return aValue < bValue ? 1 : aValue > bValue ? -1 : 0;
       }
     });
-  };
-
-  const filterAndSortTasks = (tasks) => {
-      // First filter by status
-      let filteredTasks = tasks;
-      if (taskFilter === 'completed') {
-        filteredTasks = tasks.filter(task => task.status === 'completed');
-      } else if (taskFilter === 'pending') {
-        filteredTasks = tasks.filter(task => task.status === 'pending');
-      } else if (taskFilter === 'active') {
-        // Active: pending tasks that are not overdue
-        filteredTasks = tasks.filter(task => {
-          if (task.status !== 'pending') return false;
-          if (!task.due_date) return true; // No due date = active
-
-          const dueDate = new Date(task.due_date);
-          const now = new Date();
-          return dueDate >= now; // Not overdue
-        });
-      } else if (taskFilter === 'due_soon') {
-        // Due soon: pending tasks due within 3 days
-        filteredTasks = tasks.filter(task => {
-          if (task.status !== 'pending' || !task.due_date) return false;
-
-          const dueDate = new Date(task.due_date);
-          const now = new Date();
-          const timeDiff = dueDate.getTime() - now.getTime();
-          const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
-          return daysDiff >= 0 && daysDiff <= 3;
-        });
-      } else if (taskFilter === 'overdue') {
-        // Overdue: pending tasks past due date
-        filteredTasks = tasks.filter(task => {
-          if (task.status !== 'pending' || !task.due_date) return false;
-
-          const dueDate = new Date(task.due_date);
-          const now = new Date();
-          return dueDate < now;
-        });
-      }
-
-      // Then filter by category
-      if (selectedCategory !== 'all') {
-        filteredTasks = filteredTasks.filter(task => task.category === selectedCategory);
-      }
-
-      // Then filter by search query
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        filteredTasks = filteredTasks.filter(task =>
-          task.title?.toLowerCase().includes(query) ||
-          task.description?.toLowerCase().includes(query) ||
-          task.priority?.toLowerCase().includes(query) ||
-          task.category?.toLowerCase().includes(query)
-        );
-      }
-
-      // Then sort
-      return sortTasks(filteredTasks);
-    };
-
-  const toggleMeasurementsVisibility = (userId) => {
-    const newShowMeasurements = new Set(showMeasurements);
-    if (newShowMeasurements.has(userId)) {
-      newShowMeasurements.delete(userId);
-    } else {
-      newShowMeasurements.add(userId);
-      fetchUserMeasurements(userId);
-    }
-    setShowMeasurements(newShowMeasurements);
-  };
-
-  const toggleProgressChartVisibility = (userId) => {
-    const newShowProgressChart = new Set(showProgressChart);
-    if (newShowProgressChart.has(userId)) {
-      newShowProgressChart.delete(userId);
-    } else {
-      newShowProgressChart.add(userId);
-    }
-    setShowProgressChart(newShowProgressChart);
   };
 
   const createTaskFromTemplate = async (userId, templateId) => {
@@ -1155,123 +899,11 @@ const TrainerDashboard = ({ user, onLogout }) => {
                 </div>
               </div>
 
-              {/* Bulk Actions */}
-              {bulkMode && selectedTasks.size > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-blue-900">
-                      {selectedTasks.size} tarea{selectedTasks.size !== 1 ? 's' : ''} seleccionada{selectedTasks.size !== 1 ? 's' : ''}
-                    </span>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={bulkMarkComplete}
-                        className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
-                      >
-                        <CheckSquare className="w-4 h-4" />
-                        Marcar Completadas
-                      </button>
-                      <button
-                        onClick={bulkMarkPending}
-                        className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
-                      >
-                        <Clock className="w-4 h-4" />
-                        Marcar Pendientes
-                      </button>
-                      <button
-                        onClick={clearSelection}
-                        className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors text-sm"
-                      >
-                        Limpiar Selección
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
 
-              {/* Task Templates */}
-              {showTemplates && (
-                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-indigo-900">Plantillas de Tareas</h3>
-                    <button
-                      onClick={() => setShowTemplates(false)}
-                      className="text-indigo-600 hover:text-indigo-800"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {taskTemplates.map(template => {
-                      const categoryInfo = taskCategories.find(cat => cat.id === template.category);
-                      return (
-                        <div key={template.id} className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
-                          <div className="flex items-start justify-between mb-2">
-                            <span className="text-lg">{categoryInfo?.icon}</span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${categoryInfo?.color}`}>
-                              {categoryInfo?.name}
-                            </span>
-                          </div>
-                          <h4 className="font-medium text-gray-900 mb-2 text-sm">{template.title}</h4>
-                          <p className="text-xs text-gray-600 mb-3 line-clamp-2">{template.description}</p>
-                          <div className="flex items-center justify-between">
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              template.priority === 'high' ? 'bg-red-100 text-red-800' :
-                              template.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-green-100 text-green-800'
-                            }`}>
-                              {template.priority === 'high' ? 'Alta' : template.priority === 'medium' ? 'Media' : 'Baja'}
-                            </span>
-                            <button
-                              onClick={() => {
-                                // For now, create for first user. In a real app, you'd select a user
-                                if (fetchedUsers.length > 0) {
-                                  createTaskFromTemplate(template.id, fetchedUsers[0].id);
-                                }
-                              }}
-                              className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
-                            >
-                              Usar Plantilla
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
-              {/* Quick Actions */}
-              <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-lg font-bold text-gray-900 mb-4">Acciones Rápidas</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button
-                    onClick={() => setActiveTab('users')}
-                    className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <Users className="w-6 h-6 text-blue-600 mb-2" />
-                    <p className="font-semibold text-gray-900">Gestionar Usuarios</p>
-                    <p className="text-sm text-gray-600">Ver y editar tus usuarios</p>
-                  </button>
 
-                  <button
-                    onClick={() => setActiveTab('live-classes')}
-                    className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <Video className="w-6 h-6 text-green-600 mb-2" />
-                    <p className="font-semibold text-gray-900">Clases en Vivo</p>
-                    <p className="text-sm text-gray-600">Crear y gestionar clases</p>
-                  </button>
 
-                  <button
-                    onClick={() => setActiveTab('classes')}
-                    className="p-4 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-left"
-                  >
-                    <BookOpen className="w-6 h-6 text-indigo-600 mb-2" />
-                    <p className="font-semibold text-gray-900">Clases</p>
-                    <p className="text-sm text-gray-600">Asignar clases a usuarios</p>
-                  </button>
-                </div>
-              </div>
+
             </div>
           )}
 
@@ -1713,35 +1345,13 @@ const TrainerDashboard = ({ user, onLogout }) => {
             <div className="p-6 space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-gray-900">Tareas</h2>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setBulkMode(!bulkMode)}
-                    className={`px-4 py-2 rounded-lg transition-colors ${
-                      bulkMode
-                        ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                        : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                    }`}
-                  >
-                    {bulkMode ? 'Salir Modo Masivo' : 'Modo Masivo'}
-                  </button>
-                  <button
-                    onClick={() => setShowTemplates(!showTemplates)}
-                    className={`px-4 py-2 rounded-lg transition-colors ${
-                      showTemplates
-                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                        : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                    }`}
-                  >
-                    📋 Plantillas
-                  </button>
-                  <button
-                    onClick={() => handleOpenTaskModal()}
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Nueva Tarea
-                  </button>
-                </div>
+                <button
+                  onClick={() => handleOpenTaskModal()}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                >
+                  <Plus className="w-5 h-5" />
+                  Nueva Tarea
+                </button>
               </div>
 
               {/* Task Filters, Search and Sorting */}
@@ -1844,36 +1454,7 @@ const TrainerDashboard = ({ user, onLogout }) => {
                       </div>
                     </div>
 
-                    {/* Category Filters */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-700 mr-2">Categoría:</span>
-                      <div className="flex gap-1 flex-wrap">
-                        <button
-                          onClick={() => setSelectedCategory('all')}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            selectedCategory === 'all'
-                              ? 'bg-gray-600 text-white'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          Todas
-                        </button>
-                        {taskCategories.map(category => (
-                          <button
-                            key={category.id}
-                            onClick={() => setSelectedCategory(category.id)}
-                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
-                              selectedCategory === category.id
-                                ? `${category.color.replace('bg-', 'bg-').replace('text-', 'text-')} ring-2 ring-offset-1 ring-gray-400`
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                          >
-                            <span>{category.icon}</span>
-                            <span className="hidden sm:inline">{category.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+
 
                     {/* Sorting */}
                     <div className="flex items-center gap-2">
@@ -1902,248 +1483,123 @@ const TrainerDashboard = ({ user, onLogout }) => {
 
               <div className="bg-white rounded-lg shadow overflow-hidden">
                 {trainerTasksLoading ? (
-                  <div className="divide-y divide-gray-200">
-                    <UserTaskSkeleton />
-                    <UserTaskSkeleton />
-                    <UserTaskSkeleton />
-                  </div>
-                ) : trainerTasks.length > 0 ? (
-                  <div className="divide-y divide-gray-200">
-                    {trainerTasks.map((userTasks) => {
-                      const { user, tasks, stats } = userTasks;
-                      const isExpanded = expandedUsers.has(user.id);
+                  <div className="p-8 text-center text-gray-600">Cargando tareas...</div>
+                ) : (() => {
+                  // Filter and sort tasks
+                  const filteredTasks = (() => {
+                    let tasks = [...trainerTasks];
 
-                      return (
-                        <div key={user.id} className="p-4">
-                          {/* User Header */}
-                          <div
-                            className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-2 rounded-lg"
-                            onClick={() => toggleUserExpansion(user.id)}
-                          >
-                            <div className="flex items-center gap-3">
-                              {isExpanded ? (
-                                <ChevronDown className="w-5 h-5 text-gray-500" />
-                              ) : (
-                                <ChevronRight className="w-5 h-5 text-gray-500" />
-                              )}
-                              <div>
-                                <p className="font-semibold text-gray-900">{user.name}</p>
-                                <p className="text-sm text-gray-600">{user.email}</p>
+                    // Filter by status
+                    if (taskFilter === 'pending') {
+                      tasks = tasks.filter(task => task.status === 'pending');
+                    } else if (taskFilter === 'completed') {
+                      tasks = tasks.filter(task => task.status === 'completed');
+                    } else if (taskFilter === 'active') {
+                      tasks = tasks.filter(task => task.status !== 'completed');
+                    } else if (taskFilter === 'due_soon') {
+                      tasks = tasks.filter(task => {
+                        if (!task.due_date || task.status === 'completed') return false;
+                        const dueDate = new Date(task.due_date);
+                        const now = new Date();
+                        const daysDiff = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+                        return daysDiff >= 0 && daysDiff <= 3;
+                      });
+                    } else if (taskFilter === 'overdue') {
+                      tasks = tasks.filter(task => {
+                        if (task.status !== 'pending' || !task.due_date) return false;
+                        const dueDate = new Date(task.due_date);
+                        const now = new Date();
+                        return dueDate < now;
+                      });
+                    }
+
+                    // Filter by search query
+                    if (searchQuery.trim()) {
+                      const query = searchQuery.toLowerCase().trim();
+                      tasks = tasks.filter(task =>
+                        task.title?.toLowerCase().includes(query) ||
+                        task.description?.toLowerCase().includes(query) ||
+                        task.priority?.toLowerCase().includes(query)
+                      );
+                    }
+
+                    // Sort
+                    return sortTasks(tasks);
+                  })();
+
+                  return filteredTasks.length > 0 ? (
+                    <div className="divide-y divide-gray-200">
+                      {filteredTasks.map((task) => (
+                        <div key={task.id} className="p-4 hover:bg-gray-50">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className="font-semibold text-gray-900">{task.title}</h3>
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  task.priority === 'high' ? 'bg-red-100 text-red-800' :
+                                  task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-green-100 text-green-800'
+                                }`}>
+                                  {task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Media' : 'Baja'}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                  task.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {task.status === 'completed' ? 'Completada' : task.status === 'pending' ? 'Pendiente' : task.status}
+                                </span>
+                              </div>
+                              <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                              <div className="flex items-center gap-4 text-xs text-gray-500">
+                                <span>👤 {fetchedUsers.find(u => u.id === task.user_id)?.full_name || 'Usuario'}</span>
+                                <span>📅 {task.due_date ? new Date(task.due_date).toLocaleDateString('es-ES') : 'Sin fecha'}</span>
+                                <span>📝 {task.type}</span>
                               </div>
                             </div>
-
-                            {/* Progress Overview */}
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <div className="text-sm text-gray-600">Progreso</div>
-                                <div className="text-lg font-bold text-gray-900">
-                                  {stats.completed} de {stats.total}
-                                </div>
-                              </div>
-                              <div className="relative w-12 h-12">
-                                <svg className="w-12 h-12 transform -rotate-90" viewBox="0 0 36 36">
-                                  <path
-                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                    fill="none"
-                                    stroke="#e5e7eb"
-                                    strokeWidth="3"
-                                  />
-                                  <path
-                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                    fill="none"
-                                    stroke="#10b981"
-                                    strokeWidth="3"
-                                    strokeDasharray={`${stats.completionPercentage}, 100`}
-                                  />
-                                </svg>
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                  <span className="text-xs font-bold text-gray-900">
-                                    {stats.completionPercentage}%
-                                  </span>
-                                </div>
-                              </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleOpenTaskModal(task)}
+                                className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
+                                title="Editar"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (window.confirm('¿Eliminar esta tarea?')) {
+                                    apiClient.deleteTask(task.id).then(() => {
+                                      fetchTrainerTasks();
+                                      showToast('Tarea eliminada', 'success');
+                                    }).catch(err => {
+                                      showToast(err.message || 'Error al eliminar', 'error');
+                                    });
+                                  }
+                                }}
+                                className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+                                title="Eliminar"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
                           </div>
-
-                          {/* Tasks List */}
-                          {isExpanded && (
-                            <div className="mt-4 pl-8">
-                              {(() => {
-                                const processedTasks = filterAndSortTasks(tasks);
-                                return processedTasks.length > 0 ? (
-                                  <div className="space-y-2">
-                                    {processedTasks.map((task) => (
-                                      <TaskCard
-                                        key={task.id}
-                                        title={task.title}
-                                        dueDate={task.due_date ? new Date(task.due_date).toLocaleDateString('es-ES') : 'Sin fecha'}
-                                        priority={task.priority}
-                                        completed={task.status === 'completed'}
-                                        onToggle={() => toggleTaskCompletion(task.id, task.status)}
-                                        selectable={bulkMode}
-                                        selected={selectedTasks.has(task.id)}
-                                        onSelect={() => toggleTaskSelection(task.id)}
-                                        rawDueDate={task.due_date}
-                                      />
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="text-center py-8 text-gray-500">
-                                    <CheckSquare className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                                    <p>No hay tareas {
-                                      taskFilter === 'pending' ? 'pendientes' :
-                                      taskFilter === 'completed' ? 'completadas' :
-                                      taskFilter === 'active' ? 'activas' :
-                                      taskFilter === 'due_soon' ? 'próximas a vencer' :
-                                      taskFilter === 'overdue' ? 'vencidas' :
-                                      ''
-                                    } asignadas</p>
-                                  </div>
-                                );
-                              })()}
-
-                              {/* Progress Chart Section */}
-                              <div className="mt-6">
-                                <button
-                                  onClick={() => toggleProgressChartVisibility(user.id)}
-                                  className="flex items-center gap-2 text-green-600 hover:text-green-800 font-medium"
-                                >
-                                  <span className="text-lg">📊</span>
-                                  <span>Gráfico de Progreso</span>
-                                  {showProgressChart.has(user.id) ? (
-                                    <ChevronDown className="w-4 h-4" />
-                                  ) : (
-                                    <ChevronRight className="w-4 h-4" />
-                                  )}
-                                </button>
-
-                                {showProgressChart.has(user.id) && (
-                                  <div className="mt-4">
-                                    <ProgressChart userTasks={tasks} userName={user.name} />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Measurements Section */}
-                              <div className="mt-6">
-                                <button
-                                  onClick={() => toggleMeasurementsVisibility(user.id)}
-                                  className="flex items-center gap-2 text-blue-600 hover:text-blue-800 font-medium"
-                                >
-                                  <span className="text-lg">📏</span>
-                                  <span>Mediciones Corporales</span>
-                                  {showMeasurements.has(user.id) ? (
-                                    <ChevronDown className="w-4 h-4" />
-                                  ) : (
-                                    <ChevronRight className="w-4 h-4" />
-                                  )}
-                                </button>
-
-                                {showMeasurements.has(user.id) && (
-                                  <div className="mt-4 bg-gray-50 rounded-lg p-4">
-                                    <p className="text-sm text-gray-600 mb-4">Registra las medidas corporales para seguimiento del progreso</p>
-
-                                    {measurementsLoading[user.id] ? (
-                                      <div className="text-center py-4">
-                                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-                                        <p className="text-sm text-gray-600 mt-2">Cargando mediciones...</p>
-                                      </div>
-                                    ) : (
-                                      <div className="space-y-4">
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                          <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                              Perímetro de Pierna (cm)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              value={measurements[user.id]?.legPerimeter || ''}
-                                              onChange={(e) => setMeasurements(prev => ({
-                                                ...prev,
-                                                [user.id]: { ...prev[user.id], legPerimeter: e.target.value }
-                                              }))}
-                                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                              placeholder="Ej: 50"
-                                            />
-                                          </div>
-
-                                          <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                              Perímetro de Tren Superior (cm)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              value={measurements[user.id]?.upperBodyPerimeter || ''}
-                                              onChange={(e) => setMeasurements(prev => ({
-                                                ...prev,
-                                                [user.id]: { ...prev[user.id], upperBodyPerimeter: e.target.value }
-                                              }))}
-                                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                              placeholder="Ej: 90"
-                                            />
-                                          </div>
-
-                                          <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                              Perímetro de Brazo (cm)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              value={measurements[user.id]?.armPerimeter || ''}
-                                              onChange={(e) => setMeasurements(prev => ({
-                                                ...prev,
-                                                [user.id]: { ...prev[user.id], armPerimeter: e.target.value }
-                                              }))}
-                                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                              placeholder="Ej: 30"
-                                            />
-                                          </div>
-                                        </div>
-
-                                        <div className="flex justify-end">
-                                          <button
-                                            onClick={() => handleSaveMeasurements(user.id)}
-                                            disabled={measurementsLoading[user.id]}
-                                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                          >
-                                            {measurementsLoading[user.id] ? 'Guardando...' : 'Guardar Medidas'}
-                                          </button>
-                                        </div>
-
-                                        {/* Recent Measurements History */}
-                                        {measurements[user.id] && measurements[user.id].length > 0 && (
-                                          <div className="mt-4">
-                                            <h4 className="text-sm font-medium text-gray-700 mb-2">Historial Reciente</h4>
-                                            <div className="space-y-2 max-h-32 overflow-y-auto">
-                                              {measurements[user.id].slice(0, 3).map((measurement, index) => (
-                                                <div key={index} className="text-xs text-gray-600 bg-white p-2 rounded">
-                                                  {new Date(measurement.measured_at).toLocaleDateString('es-ES')} -
-                                                  Pierna: {measurement.thigh_perimeter}cm,
-                                                  Superior: {measurement.chest_perimeter}cm,
-                                                  Brazo: {measurement.bicep_perimeter}cm
-                                                </div>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
                         </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-8 text-center text-gray-600">
-                    <CheckSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium">No hay tareas</p>
-                    <p className="text-sm text-gray-500 mt-1">Crea tu primera tarea para comenzar</p>
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-gray-500">
+                      <CheckSquare className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p>No hay tareas {
+                        taskFilter === 'pending' ? 'pendientes' :
+                        taskFilter === 'completed' ? 'completadas' :
+                        taskFilter === 'active' ? 'activas' :
+                        taskFilter === 'due_soon' ? 'próximas a vencer' :
+                        taskFilter === 'overdue' ? 'vencidas' :
+                        ''
+                      }</p>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

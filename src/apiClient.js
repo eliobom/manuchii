@@ -1,5 +1,66 @@
 import { supabase } from './supabaseClient';
 
+const SUPABASE_BASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+const UPLOADS_BUCKET = import.meta.env.VITE_SUPABASE_UPLOADS_BUCKET || 'class-attachments';
+const TASK_ATTACHMENTS_BUCKET = import.meta.env.VITE_SUPABASE_TASK_ATTACHMENTS_BUCKET || 'task-attachments';
+const CLASS_ATTACHMENTS_BUCKET = import.meta.env.VITE_SUPABASE_CLASS_ATTACHMENTS_BUCKET || 'class-attachments';
+
+const DEFAULT_FALLBACK_BUCKET = UPLOADS_BUCKET;
+
+const isBucketNotFoundError = (err) => {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return msg.includes('bucket') && msg.includes('not found');
+};
+
+const uploadWithBucketFallback = async ({ preferredBucket, fallbackBucket = DEFAULT_FALLBACK_BUCKET, path, file, options }) => {
+  try {
+    const { data, error } = await supabase.storage
+      .from(preferredBucket)
+      .upload(path, file, options);
+    if (error) throw error;
+    return { bucket: preferredBucket, path: data.path || path };
+  } catch (err) {
+    if (!fallbackBucket || !isBucketNotFoundError(err)) {
+      throw err;
+    }
+
+    const { data, error } = await supabase.storage
+      .from(fallbackBucket)
+      .upload(path, file, options);
+    if (error) throw error;
+    return { bucket: fallbackBucket, path: data.path || path };
+  }
+};
+
+const removeWithBucketFallback = async ({ preferredBucket, fallbackBucket = DEFAULT_FALLBACK_BUCKET, paths }) => {
+  try {
+    const { error } = await supabase.storage
+      .from(preferredBucket)
+      .remove(paths);
+    if (error) throw error;
+    return { bucket: preferredBucket };
+  } catch (err) {
+    if (!fallbackBucket || !isBucketNotFoundError(err)) {
+      throw err;
+    }
+
+    const { error } = await supabase.storage
+      .from(fallbackBucket)
+      .remove(paths);
+    if (error) throw error;
+    return { bucket: fallbackBucket };
+  }
+};
+
+const buildPublicStorageUrl = (bucket, path) => {
+  const base = String(SUPABASE_BASE_URL || '').replace(/\/$/, '');
+  if (!base) return null;
+  const cleanBucket = String(bucket || '').replace(/^\/+|\/+$/g, '');
+  const cleanPath = String(path || '').replace(/^\/+/, '');
+  return `${base}/storage/v1/object/public/${cleanBucket}/${cleanPath}`;
+};
+
 class ApiClient {
   constructor() {
     this.token = localStorage.getItem('token');
@@ -370,6 +431,15 @@ class ApiClient {
     return data;
   }
 
+  async deleteTask(id) {
+    const { error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  }
+
   // Live Classes - using Supabase
   async getLiveClasses() {
     const { data, error } = await supabase
@@ -475,23 +545,35 @@ class ApiClient {
 
   // File Upload - using Supabase Storage
   async uploadFile(file) {
-    const fileName = `${Date.now()}_${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('uploads')
-      .upload(fileName, file);
-    
-    if (error) throw new Error(error.message);
-    
-    const { data: { publicUrl } } = supabase.storage
-      .from('uploads')
-      .getPublicUrl(fileName);
-    
-    return { url: publicUrl, path: data.path };
+    const sanitizedFileName = String(file?.name || 'archivo').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fileName = `${Date.now()}_${sanitizedFileName}`;
+
+    try {
+      const { data, error } = await supabase.storage
+        .from(UPLOADS_BUCKET)
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type || 'application/octet-stream'
+        });
+
+      if (error) throw error;
+
+      const publicUrl = buildPublicStorageUrl(UPLOADS_BUCKET, data.path || fileName);
+      return { url: publicUrl, path: data.path, fileName, size: file.size, mimeType: file.type };
+    } catch (err) {
+      if (isBucketNotFoundError(err)) {
+        throw new Error(
+          `Bucket not found: ${UPLOADS_BUCKET}. Crea el bucket en Supabase Storage o configura VITE_SUPABASE_UPLOADS_BUCKET con el nombre correcto.`
+        );
+      }
+      throw new Error(err?.message || String(err));
+    }
   }
 
   async deleteFile(path) {
     const { error } = await supabase.storage
-      .from('uploads')
+      .from(UPLOADS_BUCKET)
       .remove([path]);
     if (error) throw new Error(error.message);
     return { success: true };
@@ -590,21 +672,84 @@ class ApiClient {
   }
 
   async uploadTaskAttachment(taskId, file) {
-    const fileName = `${taskId}/${Date.now()}_${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('task-attachments')
-      .upload(fileName, file);
+    // Sanitize filename - replace special characters
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fileName = `${taskId}/${Date.now()}_${sanitizedFileName}`;
     
-    if (error) throw new Error(error.message);
+    const uploadRes = await uploadWithBucketFallback({
+      preferredBucket: TASK_ATTACHMENTS_BUCKET,
+      fallbackBucket: DEFAULT_FALLBACK_BUCKET,
+      path: fileName,
+      file,
+      options: {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || 'application/octet-stream'
+      }
+    });
     
-    const { data: { publicUrl } } = supabase.storage
-      .from('task-attachments')
-      .getPublicUrl(fileName);
+    const publicUrl = buildPublicStorageUrl(uploadRes.bucket, uploadRes.path);
     
-    // Save attachment record
+    const inferredFileType = file.type?.startsWith('image/')
+      ? 'image'
+      : file.type?.startsWith('video/')
+        ? 'video'
+        : 'document';
+
+    const uploaderId = this.user?.id || null;
+    if (!uploaderId) {
+      throw new Error('No hay usuario autenticado para registrar el adjunto');
+    }
+
+    // Save attachment record (match elian_sql.sql schema)
     const { data: attachment, error: dbError } = await supabase
       .from('task_attachments')
-      .insert({ task_id: taskId, file_name: file.name, file_url: publicUrl })
+      .insert({
+        task_id: taskId,
+        user_id: null,
+        filename: uploadRes.path,
+        original_filename: file.name,
+        file_url: publicUrl,
+        file_type: inferredFileType,
+        mime_type: file.type,
+        file_size: file.size,
+        uploaded_by: uploaderId,
+        is_approved: true
+      })
+      .select()
+      .single();
+    
+    if (dbError) throw new Error(dbError.message);
+    return attachment;
+  }
+
+  async attachUploadedFile(taskId, attachmentData) {
+    // For files already uploaded (have URL, not File object)
+    const inferredFileType = attachmentData.type?.startsWith('image/')
+      ? 'image'
+      : attachmentData.type?.startsWith('video/')
+        ? 'video'
+        : 'document';
+
+    const uploaderId = this.user?.id || null;
+    if (!uploaderId) {
+      throw new Error('No hay usuario autenticado para registrar el adjunto');
+    }
+
+    const { data: attachment, error: dbError } = await supabase
+      .from('task_attachments')
+      .insert({
+        task_id: taskId,
+        user_id: null,
+        filename: attachmentData.name,
+        original_filename: attachmentData.name,
+        file_url: attachmentData.url,
+        file_type: inferredFileType,
+        mime_type: attachmentData.type,
+        file_size: attachmentData.size,
+        uploaded_by: uploaderId,
+        is_approved: true
+      })
       .select()
       .single();
     
@@ -613,8 +758,109 @@ class ApiClient {
   }
 
   async deleteTaskAttachment(attachmentId) {
+    // First fetch filename to delete from storage
+    const { data: attachment, error: fetchError } = await supabase
+      .from('task_attachments')
+      .select('filename')
+      .eq('id', attachmentId)
+      .single();
+    if (fetchError) throw new Error(fetchError.message);
+
+    if (attachment?.filename) {
+      await removeWithBucketFallback({
+        preferredBucket: TASK_ATTACHMENTS_BUCKET,
+        fallbackBucket: DEFAULT_FALLBACK_BUCKET,
+        paths: [attachment.filename]
+      });
+    }
+
     const { error } = await supabase
       .from('task_attachments')
+      .delete()
+      .eq('id', attachmentId);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  }
+
+  // Class Attachments - using Supabase (class_attachments table + class-attachments bucket)
+  async getClassAttachments(classId) {
+    const { data, error } = await supabase
+      .from('class_attachments')
+      .select('*')
+      .eq('class_id', classId)
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
+  async uploadClassAttachment(classId, file) {
+    // Sanitize filename - replace special characters
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fileName = `${classId}/${Date.now()}_${sanitizedFileName}`;
+    
+    const uploadRes = await uploadWithBucketFallback({
+      preferredBucket: CLASS_ATTACHMENTS_BUCKET,
+      fallbackBucket: DEFAULT_FALLBACK_BUCKET,
+      path: fileName,
+      file,
+      options: {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || 'application/octet-stream'
+      }
+    });
+
+    const publicUrl = buildPublicStorageUrl(uploadRes.bucket, uploadRes.path);
+
+    const inferredFileType = file.type?.startsWith('image/')
+      ? 'image'
+      : file.type?.startsWith('video/')
+        ? 'video'
+        : 'document';
+
+    const uploaderId = this.user?.id || null;
+    if (!uploaderId) {
+      throw new Error('No hay usuario autenticado para registrar el adjunto');
+    }
+
+    const { data: attachment, error: dbError } = await supabase
+      .from('class_attachments')
+      .insert({
+        class_id: classId,
+        user_id: null,
+        filename: uploadRes.path,
+        original_filename: file.name,
+        file_url: publicUrl,
+        file_type: inferredFileType,
+        mime_type: file.type,
+        file_size: file.size,
+        uploaded_by: uploaderId,
+        is_approved: true
+      })
+      .select()
+      .single();
+    if (dbError) throw new Error(dbError.message);
+    return attachment;
+  }
+
+  async deleteClassAttachment(attachmentId) {
+    const { data: attachment, error: fetchError } = await supabase
+      .from('class_attachments')
+      .select('filename')
+      .eq('id', attachmentId)
+      .single();
+    if (fetchError) throw new Error(fetchError.message);
+
+    if (attachment?.filename) {
+      await removeWithBucketFallback({
+        preferredBucket: CLASS_ATTACHMENTS_BUCKET,
+        fallbackBucket: DEFAULT_FALLBACK_BUCKET,
+        paths: [attachment.filename]
+      });
+    }
+
+    const { error } = await supabase
+      .from('class_attachments')
       .delete()
       .eq('id', attachmentId);
     if (error) throw new Error(error.message);
@@ -628,5 +874,4 @@ class ApiClient {
     localStorage.removeItem('user');
   }
 }
-
 export const apiClient = new ApiClient();

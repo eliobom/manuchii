@@ -28,6 +28,7 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
     image: '',
     document: ''
   });
+  const [pendingAttachments, setPendingAttachments] = useState([]);
 
   const taskTypes = [
     { value: 'exercise', label: 'Ejercicio', icon: '🏋️', color: 'bg-green-100 text-green-800' },
@@ -101,7 +102,7 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
   const addMedia = (type) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = type === 'video' ? 'video/*' : type === 'image' ? 'image/*' : '*';
+    input.accept = type === 'video' ? 'video/*' : type === 'image' ? 'image/*' : 'application/pdf,.pdf';
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (file) {
@@ -123,6 +124,30 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
       }
     };
     input.click();
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const result = await apiClient.uploadFile(file);
+      setPendingAttachments(prev => [...prev, {
+        url: result.url,
+        name: result.fileName,
+        size: result.size,
+        type: file.type
+      }]);
+    } catch (error) {
+      alert('Error al subir archivo: ' + error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removePendingAttachment = (index) => {
+    setPendingAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
   const addMediaFromUrl = (type) => {
@@ -178,7 +203,10 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
   const validateForm = () => {
     const newErrors = {};
 
-    if (!formData.user_id) newErrors.user_id = 'Usuario es requerido';
+    // user_id no es requerido si es "all" o está vacío
+    if (!formData.user_id || formData.user_id === 'all') {
+      // OK - tarea para todos o sin asignar
+    }
     if (!formData.title.trim()) newErrors.title = 'Título es requerido';
     if (!formData.description.trim()) newErrors.description = 'Descripción es requerida';
     if (!formData.type) newErrors.type = 'Tipo de tarea es requerido';
@@ -192,10 +220,13 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
     if (validateForm()) {
       const dataToSave = {
         ...formData,
+        // Si user_id es "all", lo dejamos como null (sin asignar)
+        user_id: formData.user_id === 'all' ? null : formData.user_id,
         config: {
           ...formData.config,
           video_url: urlInputs.video || null,
-          goals: formData.config.goals.filter(goal => goal.trim())
+          goals: formData.config.goals.filter(goal => goal.trim()),
+          pendingAttachments: pendingAttachments // Save pending attachments
         }
       };
       onSave(dataToSave);
@@ -238,7 +269,7 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Usuario *
+                Usuario
               </label>
               <select
                 name="user_id"
@@ -248,7 +279,8 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
                   errors.user_id ? 'border-red-500' : 'border-gray-300'
                 }`}
               >
-                <option value="">Seleccionar usuario</option>
+                <option value="all">Todos los usuarios</option>
+                <option value="">Seleccionar usuario específico</option>
                 {appUsers.map(user => (
                   <option key={user.id} value={user.id}>
                     {user.full_name} {user.last_names}
@@ -361,6 +393,36 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
           <div className="border-t pt-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Contenido Multimedia</h3>
 
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              <button
+                type="button"
+                onClick={() => addMedia('video')}
+                disabled={uploading}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Video className="w-4 h-4" />
+                Subir Video
+              </button>
+              <button
+                type="button"
+                onClick={() => addMedia('image')}
+                disabled={uploading}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Image className="w-4 h-4" />
+                Subir Imagen
+              </button>
+              <button
+                type="button"
+                onClick={() => addMedia('document')}
+                disabled={uploading}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-800 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FileText className="w-4 h-4" />
+                Subir PDF
+              </button>
+            </div>
+
             <div className="space-y-4 mb-4">
               {/* Video URL Input */}
               <div className="flex gap-2">
@@ -459,7 +521,70 @@ const TaskModal = ({ isOpen, onClose, task, onSave, isLoading, appUsers }) => {
 
           {/* Attachments Section */}
           <div className="border-t pt-6">
-            <AttachmentSection taskId={task?.id} isEditing={true} />
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Archivos Adjuntos</h3>
+
+            {/* Upload button - works even before saving */}
+            <div className="mb-4">
+              <div className="relative">
+                <input
+                  type="file"
+                  onChange={handleFileUpload}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  disabled={uploading}
+                />
+                <button
+                  type="button"
+                  disabled={uploading}
+                  className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg transition-colors w-full"
+                >
+                  {uploading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Subiendo...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      Subir Archivo
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Sube archivos antes o después de guardar la tarea
+              </p>
+            </div>
+
+            {/* Pending attachments (not yet saved to DB) */}
+            {pendingAttachments.length > 0 && (
+              <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm font-medium text-yellow-800 mb-2">
+                  Archivos pendientes de guardar ({pendingAttachments.length})
+                </p>
+                <div className="space-y-2">
+                  {pendingAttachments.map((att, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 bg-white rounded">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-gray-500" />
+                        <span className="text-sm">{att.name}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removePendingAttachment(index)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Attachments already saved (only if task exists) */}
+            {task?.id && (
+              <AttachmentSection taskId={task.id} isEditing={true} />
+            )}
           </div>
 
           {/* Instructions */}

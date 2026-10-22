@@ -1,20 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Play, Image as ImageIcon, Video, Clock, Target } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Edit, Trash2, Play, Image as ImageIcon, Video, Clock, Target, Upload, X } from 'lucide-react';
 import { apiClient } from '../apiClient';
+import ClassAttachmentSection from './ClassAttachmentSection';
 
 const ClassesManager = () => {
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     video_url: '',
     category: 'strength',
     duration: 30,
-    difficulty: 'intermediate',
-    status: 'active'
+    level: 'Intermedio',
+    allow_user_uploads: false,
+    media_type: 'video'
   });
 
   const categories = [
@@ -29,9 +33,9 @@ const ClassesManager = () => {
   ];
 
   const difficulties = [
-    { value: 'beginner', label: 'Principiante' },
-    { value: 'intermediate', label: 'Intermedio' },
-    { value: 'advanced', label: 'Avanzado' }
+    { value: 'Principiante', label: 'Principiante' },
+    { value: 'Intermedio', label: 'Intermedio' },
+    { value: 'Avanzado', label: 'Avanzado' }
   ];
 
   useEffect(() => {
@@ -41,8 +45,8 @@ const ClassesManager = () => {
   const fetchClasses = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get('/classes');
-      setClasses(response.data);
+      const data = await apiClient.getClasses();
+      setClasses(data || []);
     } catch (error) {
       console.error('Error fetching classes:', error);
     } finally {
@@ -53,10 +57,22 @@ const ClassesManager = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        video_url: formData.video_url,
+        category: formData.category,
+        duration: formData.duration,
+        level: formData.level,
+        allow_user_uploads: formData.allow_user_uploads,
+        media_type: formData.media_type,
+        instructor_id: apiClient.user?.id || null
+      };
+
       if (editingClass) {
-        await apiClient.put(`/classes/${editingClass.id}`, formData);
+        await apiClient.updateClass(editingClass.id, payload);
       } else {
-        await apiClient.post('/classes', formData);
+        await apiClient.createClass(payload);
       }
       
       resetForm();
@@ -75,8 +91,9 @@ const ClassesManager = () => {
       video_url: classItem.video_url || '',
       category: classItem.category || 'strength',
       duration: classItem.duration || 30,
-      difficulty: classItem.difficulty || 'intermediate',
-      status: classItem.status || 'active'
+      level: classItem.level || 'Intermedio',
+      allow_user_uploads: classItem.allow_user_uploads || false,
+      media_type: classItem.media_type || 'video'
     });
     setShowForm(true);
   };
@@ -84,7 +101,7 @@ const ClassesManager = () => {
   const handleDelete = async (classId) => {
     if (confirm('¿Estás seguro de que quieres eliminar esta clase?')) {
       try {
-        await apiClient.delete(`/classes/${classId}`);
+        await apiClient.deleteClass(classId);
         fetchClasses();
       } catch (error) {
         console.error('Error deleting class:', error);
@@ -100,11 +117,43 @@ const ClassesManager = () => {
       video_url: '',
       category: 'strength',
       duration: 30,
-      difficulty: 'intermediate',
-      status: 'active'
+      level: 'Intermedio',
+      allow_user_uploads: false,
+      media_type: 'video'
     });
     setEditingClass(null);
     setShowForm(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+    if (!validTypes.includes(file.type)) {
+      alert('Tipo de archivo no válido. Solo se permiten videos, imágenes y PDF');
+      return;
+    }
+
+    if (file.size > 50 * 1024 * 1024) {
+      alert('El archivo es demasiado grande. Máximo 50MB');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const result = await apiClient.uploadFile(file);
+      setFormData({ ...formData, video_url: result.url });
+      alert('Archivo subido correctamente');
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Error al subir el archivo. Intenta con una URL directamente.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const isVideoUrl = (url) => {
@@ -126,9 +175,9 @@ const ClassesManager = () => {
 
   const getDifficultyColor = (difficulty) => {
     switch (difficulty) {
-      case 'beginner': return 'bg-green-100 text-green-800';
-      case 'intermediate': return 'bg-yellow-100 text-yellow-800';
-      case 'advanced': return 'bg-red-100 text-red-800';
+      case 'Principiante': return 'bg-green-100 text-green-800';
+      case 'Intermedio': return 'bg-yellow-100 text-yellow-800';
+      case 'Avanzado': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -174,52 +223,90 @@ const ClassesManager = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Título *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Ej: Press de banca con barra"
-                />
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Título *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Ej: Press de banca con barra"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Categoría
+                  </label>
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {categories.map(cat => (
+                      <option key={cat.value} value={cat.value}>{cat.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Descripción
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
                   placeholder="Describe los ejercicios y técnicas..."
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  URL del Video/GIF *
-                </label>
-                <input
-                  type="url"
-                  required
-                  value={formData.video_url}
-                  onChange={(e) => setFormData({ ...formData, video_url: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://fitcron.com/wp-content/uploads/2021/03/00251301-Barbell-Bench-Press_Chest-FIX_720.gif"
-                />
-                <p className="text-sm text-gray-500 mt-1">
-                  Pega la URL del video o GIF de ejercicios (YouTube, GIF, MP4, etc.)
-                </p>
+              {/* SECCIÓN DE SUBIR VIDEO/IMAGEN - MUY VISIBLE */}
+              <div className="border-2 border-dashed border-blue-500 rounded-xl p-8 bg-gradient-to-br from-blue-50 to-blue-100">
+                <div className="text-center">
+                  <Video className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">
+                    📹 Sube tu Video o Imagen
+                  </h3>
+                  <p className="text-gray-600 mb-6">
+                    Selecciona un archivo de tu computadora (MP4, MOV, WebM, JPG, PNG, GIF)
+                  </p>
+                  <label className="cursor-pointer inline-flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-xl transition-all shadow-lg hover:shadow-xl font-bold text-lg">
+                    <Upload className="w-6 h-6" />
+                    Seleccionar Archivo
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      disabled={uploading}
+                    />
+                  </label>
+                </div>
+                {uploading && (
+                  <div className="mt-6 text-center">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <p className="text-blue-700 font-medium mt-2">Subiendo archivo...</p>
+                  </div>
+                )}
+                {formData.video_url && !uploading && (
+                  <div className="mt-6 p-4 bg-green-100 border-2 border-green-400 rounded-lg">
+                    <p className="text-green-800 font-bold flex items-center justify-center gap-2">
+                      ✓ ¡Archivo subido exitosamente!
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Categoría
@@ -254,8 +341,8 @@ const ClassesManager = () => {
                     Dificultad
                   </label>
                   <select
-                    value={formData.difficulty}
-                    onChange={(e) => setFormData({ ...formData, difficulty: e.target.value })}
+                    value={formData.level}
+                    onChange={(e) => setFormData({ ...formData, level: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     {difficulties.map(diff => (
@@ -265,18 +352,42 @@ const ClassesManager = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Estado
-                </label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="active">Activa</option>
-                  <option value="inactive">Inactiva</option>
-                </select>
+              {/* Allow user uploads checkbox */}
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="allow_user_uploads"
+                    checked={formData.allow_user_uploads}
+                    onChange={(e) => setFormData({ ...formData, allow_user_uploads: e.target.checked })}
+                    className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                  <div>
+                    <label htmlFor="allow_user_uploads" className="font-medium text-gray-900">
+                      Permitir que usuarios suban sus propios archivos
+                    </label>
+                    <p className="text-sm text-gray-600">
+                      Los usuarios podrán subir fotos y videos de sus ejercicios a esta clase
+                    </p>
+                  </div>
+                </div>
+
+                {formData.allow_user_uploads && (
+                  <div className="mt-3 ml-8">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tipos de archivos permitidos
+                    </label>
+                    <select
+                      value={formData.media_type}
+                      onChange={(e) => setFormData({ ...formData, media_type: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="video">Solo Videos</option>
+                      <option value="image">Solo Imágenes</option>
+                      <option value="both">Videos e Imágenes</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Preview */}
@@ -304,6 +415,10 @@ const ClassesManager = () => {
                   </div>
                 </div>
               )}
+
+              <div className="border-t pt-6">
+                <ClassAttachmentSection classId={editingClass?.id} isEditing={true} />
+              </div>
 
               <div className="flex gap-3 pt-4">
                 <button
@@ -364,8 +479,8 @@ const ClassesManager = () => {
               )}
               
               <div className="flex items-center gap-2 mb-3">
-                <span className={`px-2 py-1 rounded-full text-xs ${getDifficultyColor(classItem.difficulty)}`}>
-                  {difficulties.find(d => d.value === classItem.difficulty)?.label || classItem.difficulty}
+                <span className={`px-2 py-1 rounded-full text-xs ${getDifficultyColor(classItem.level)}`}>
+                  {difficulties.find(d => d.value === classItem.level)?.label || classItem.level}
                 </span>
                 <span className="text-gray-500 text-sm flex items-center gap-1">
                   <Clock className="w-3 h-3" />

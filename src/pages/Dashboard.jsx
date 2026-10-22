@@ -995,21 +995,6 @@ const Dashboard = ({ user, onLogout }) => {
           </div>
         );
 
-      case 'classes':
-        if (user?.role !== 'trainer') return null;
-        return (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-3xl font-bold text-gray-900">Gestión de Clases</h2>
-              <p className="text-gray-600 mt-1">Administra todas las clases disponibles</p>
-            </div>
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
-              <BookOpen className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600">Contenido de clases en desarrollo...</p>
-            </div>
-          </div>
-        );
-
       case 'tasks':
         if (user?.role !== 'trainer') return null;
         return (
